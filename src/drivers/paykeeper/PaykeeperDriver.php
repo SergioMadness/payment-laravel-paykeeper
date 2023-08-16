@@ -17,6 +17,11 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     private $config;
 
+    /**
+     * @var array
+     */
+    private $response;
+
     public function __construct(array $config = [])
     {
         $this->setConfig($config);
@@ -44,31 +49,60 @@ class PaykeeperDriver implements PayService, PaykeeperService
      * @param string $failReturnUrl
      * @param string $description
      * @param array $extraParams
-     * @param Receipt $receipt
+     * @param Receipt|null $receipt
      *
      * @return string
+     * @throws \Exception
      */
     public function getPaymentLink($orderId, $paymentId, float $amount, string $currency = self::CURRENCY_RUR, string $paymentType = self::PAYMENT_TYPE_CARD, string $successReturnUrl = '', string $failReturnUrl = '', string $description = '', array $extraParams = [], Receipt $receipt = null): string
     {
-        $payment_parameters = http_build_query(
-            [
-                'clientid'     => $extraParams['email'],
-                'orderid'      => $orderId,
-                'sum'          => $amount,
-                'client_phone' => $extraParams['phone'] ?? '',
-                'cart'         => json_encode($receipt->toArray()),
-            ]
-        );
-        $options = [
-            'http' => [
-                'method'  => 'POST',
-                'header'  => 'Content-type: application/x-www-form-urlencoded',
-                'content' => $payment_parameters,
-            ],
+        $base64 = base64_encode($this->config['login'] . ':' . $this->config['password']);
+        $headers = [
+            'Content-Type: application/x-www-form-urlencoded',
+            'Authorization: Basic ' . $base64,
         ];
-        $context = stream_context_create($options);
 
-        return file_get_contents('https://demo.paykeeper.ru/order/inline/', FALSE, $context);
+        $curl = curl_init();
+
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_URL, $this->config['apiUrl'] . '/info/settings/token/');
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'GET');
+        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+
+        // Инициируем запрос к API
+        $response = curl_exec($curl);
+        $tokenResponse = json_decode($response, true);
+
+        if (!isset($tokenResponse['token'])) {
+            throw new \Exception();
+        }
+
+        $paymentParameters = [
+            'clientid'     => $extraParams['user_id'],
+            'client_email' => $extraParams['email'],
+            'orderid'      => $orderId,
+            'sum'          => $amount,
+            'client_phone' => $extraParams['phone'] ?? '',
+            'cart'         => json_encode($receipt->toArray()),
+            'token'        => $tokenResponse['token'],
+        ];
+        $request = http_build_query($paymentParameters);
+
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_URL, $this->config['apiUrl'] . '/change/invoice/preview/');
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $request);
+
+
+        $response = json_decode(curl_exec($curl), true);
+        if (!isset($response['invoice_id'])) {
+            throw new \Exception();
+        }
+
+        return $this->config['invoice_url'];
     }
 
     /**
@@ -112,7 +146,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function validate(array $data): bool
     {
-        return isset($data['clientid'], $data['sum'], $data['orderid'], $data['client_phone']);
+        return md5($data['id'] . $data['sum'] . $data['clientid'] . $data['orderid'] . $this->config['secret']) === $data['key'];
     }
 
     /**
@@ -124,7 +158,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function setResponse(array $data): PayService
     {
-//        $this->response = $data;
+        $this->response = $data;
 
         return $this;
     }
@@ -136,7 +170,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getOrderId(): string
     {
-        // TODO: Implement getOrderId() method.
+        return $this->response['orderid'] ?? '';
     }
 
     /**
@@ -146,7 +180,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getPaymentId(): string
     {
-        // TODO: Implement getPaymentId() method.
+        return $this->response['paymentid'] ?? '';
     }
 
     /**
@@ -156,7 +190,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getStatus(): string
     {
-        // TODO: Implement getStatus() method.
+        return 'success';
     }
 
     /**
@@ -166,7 +200,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function isSuccess(): bool
     {
-        // TODO: Implement isSuccess() method.
+        return true;
     }
 
     /**
@@ -176,7 +210,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getTransactionId(): string
     {
-        // TODO: Implement getTransactionId() method.
+        return $this->response['RRN'] ?? '';
     }
 
     /**
@@ -186,7 +220,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getAmount(): float
     {
-        // TODO: Implement getAmount() method.
+        return $this->response['sum'] ?? '';
     }
 
     /**
@@ -196,7 +230,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getErrorCode(): string
     {
-        // TODO: Implement getErrorCode() method.
+        return '';
     }
 
     /**
@@ -216,7 +250,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getPan(): string
     {
-        // TODO: Implement getPan() method.
+        return $this->response['card_number'] ?? '';
     }
 
     /**
@@ -226,7 +260,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getDateTime(): string
     {
-        // TODO: Implement getDateTime() method.
+        return $this->response['obtain_datetime'] ?? '';
     }
 
     /**
@@ -236,7 +270,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getCurrency(): string
     {
-        // TODO: Implement getCurrency() method.
+        return 'RUB';
     }
 
     /**
@@ -246,7 +280,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getCardType(): string
     {
-        // TODO: Implement getCardType() method.
+        return '';
     }
 
     /**
@@ -256,7 +290,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getCardExpDate(): string
     {
-        // TODO: Implement getCardExpDate() method.
+        return $this->response['card_expiry'] ?? '';
     }
 
     /**
@@ -266,7 +300,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getCardUserName(): string
     {
-        // TODO: Implement getCardUserName() method.
+        return $this->response['card_holder'] ?? '';
     }
 
     /**
@@ -276,7 +310,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getIssuer(): string
     {
-        // TODO: Implement getIssuer() method.
+        return $this->response['bank_id'] ?? '';
     }
 
     /**
@@ -286,7 +320,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getEmail(): string
     {
-        // TODO: Implement getEmail() method.
+        return $this->response['client_email'] ?? '';
     }
 
     /**
@@ -296,7 +330,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getPaymentType(): string
     {
-        // TODO: Implement getPaymentType() method.
+        return '';
     }
 
     /**
@@ -320,7 +354,15 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getNotificationResponse(int $errorCode = null): Response
     {
-        // TODO: Implement getNotificationResponse() method.
+        $result = new Response();
+
+        if ($errorCode === self::RESPONSE_SUCCESS) {
+            $result->setContent('OK ' . md5($this->getParam('id') . $this->config['secret']));
+        } else {
+            $result->setContent('NOT OK')->setStatusCode(400);
+        }
+
+        return $result;
     }
 
     /**
@@ -332,7 +374,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getCheckResponse(int $errorCode = null): Response
     {
-        // TODO: Implement getCheckResponse() method.
+        return $this->getNotificationResponse($errorCode);
     }
 
     /**
@@ -342,7 +384,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getLastError(): int
     {
-        // TODO: Implement getLastError() method.
+        return 0;
     }
 
     /**
@@ -354,7 +396,7 @@ class PaykeeperDriver implements PayService, PaykeeperService
      */
     public function getParam(string $name)
     {
-        // TODO: Implement getParam() method.
+        return $this->response[$name] ?? null;
     }
 
     /**
@@ -366,6 +408,9 @@ class PaykeeperDriver implements PayService, PaykeeperService
     {
         return [
             (new PayServiceOption())->setType(PayServiceOption::TYPE_STRING)->setLabel('Url')->setAlias('apiUrl'),
+            (new PayServiceOption())->setType(PayServiceOption::TYPE_STRING)->setLabel('Login')->setAlias('login'),
+            (new PayServiceOption())->setType(PayServiceOption::TYPE_STRING)->setLabel('Password')->setAlias('password'),
+            (new PayServiceOption())->setType(PayServiceOption::TYPE_STRING)->setLabel('Secret')->setAlias('secret'),
         ];
     }
 

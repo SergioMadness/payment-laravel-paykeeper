@@ -19,14 +19,15 @@ class Receipt extends IReceipt
     /**
      * Receipt constructor.
      *
-     * @param string     $phone
-     * @param string     $email
+     * @param string $phone
+     * @param string $email
      * @param array|null $items
-     * @param int        $taxSystem
+     * @param int $taxSystem
      */
     public function __construct(?string $phone = null, ?string $email = null, array $items = [], ?string $taxSystem = null)
     {
         parent::__construct($phone ?? $email, $items, $taxSystem);
+
         $this->setEmail($email);
     }
 
@@ -55,19 +56,12 @@ class Receipt extends IReceipt
      *
      * @return array
      */
-    public function toArray()
+    public function toArray(): array
     {
         $prods = [];
 
         foreach ($this->getItems() as $item) {
-            $prods[] = [
-                'name'      => $item->getName(),
-                'price'     => $item->getPrice(),
-                'quantity'  => $item->getQty(),
-                'sum'       => $item->getPrice() * $item->getQty(),
-                'tax'       => 'none',
-                'item_type' => 'goods',
-            ];
+            $prods[] = $item->toArray();
         }
 
         return $prods;
