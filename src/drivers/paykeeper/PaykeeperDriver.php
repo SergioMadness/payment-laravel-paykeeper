@@ -79,10 +79,10 @@ class PaykeeperDriver implements PayService, PaykeeperService
         }
 
         $paymentParameters = [
-            'clientid'     => $extraParams['user_id'],
+            'clientid'     => $extraParams['customerName'] ?? $extraParams['user_id'],
             'client_email' => $extraParams['email'],
             'orderid'      => $orderId,
-            'sum'          => $amount,
+            'pay_amount'   => $amount,
             'client_phone' => $extraParams['phone'] ?? '',
             'cart'         => json_encode($receipt->toArray()),
             'token'        => $tokenResponse['token'],
@@ -96,13 +96,12 @@ class PaykeeperDriver implements PayService, PaykeeperService
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $request);
 
-
         $response = json_decode(curl_exec($curl), true);
         if (!isset($response['invoice_id'])) {
             throw new \Exception();
         }
 
-        return $this->config['invoice_url'];
+        return $response['invoice_url'];
     }
 
     /**
